@@ -1,0 +1,154 @@
+---
+title: "keratinocyte"
+author: "meilin"
+date: "2025-04-01"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,warning = FALSE)
+```
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(RColorBrewer)
+library(clusterProfiler)
+library(patchwork)
+library(cowplot)
+library(ggplot2)
+library(dplyr)
+library(forcats)
+library(tidyr)
+library(ggpubr)
+library(decoupleR)
+library(OmnipathR)
+merged_obj <- readRDS("/Users/xu/Desktop/1_project/major celltype/merged_obj.rds")
+
+all.genes <- rownames(merged_obj)
+kera <- subset(merged_obj,subset = merged_annotation=="keratinocyte")
+kera <- RunPCA(kera,features = all.genes)
+Seurat::ElbowPlot(kera,ndims=50,reduction = "pca")
+kera <- FindNeighbors(kera, dims = 1:20, reduction = "pca")
+kera <- FindClusters(kera, resolution = 1,algorithm = 4)
+kera <- RunUMAP(kera, dims = 1:20, reduction = "pca")
+DimPlot(kera, reduction="umap",group.by = "seurat_clusters")
+```
+```{r}
+cluster2 <- subset(kera,subset = seurat_clusters==2)
+cluster2 <- FindClusters(cluster2,resolution = 0.5)
+DimPlot(cluster2)
+cluster2$epi_subtype <- "unknown"
+cluster2$epi_subtype[cluster2$seurat_clusters==0] <- "basal cell"
+cluster2$epi_subtype[cluster2$seurat_clusters==1] <- "gland cell"
+cluster2$epi_subtype[cluster2$seurat_clusters==2] <- "suprabasal cell"
+table(cluster2$epi_subtype)
+
+cluster16 <- subset(kera,subset = seurat_clusters==16)
+cluster16 <- FindClusters(cluster16,resolution = 0.8)
+DimPlot(cluster16)
+cluster16$epi_subtype <- "unknown"
+cluster16$epi_subtype[cluster16$seurat_clusters%in%c(0,1,3)] <- "basal cell"
+
+cluster16$epi_subtype[cluster16$seurat_clusters%in%c(2,5)] <- "suprabasal cell"
+cluster16$epi_subtype[cluster16$seurat_clusters%in%c(4)] <- "cornified cell"
+table(cluster16$epi_subtype)
+
+cluster22 <- subset(kera,subset = seurat_clusters==22)
+cluster22 <- FindClusters(cluster22,resolution = 0.5)
+DimPlot(cluster22)
+cluster22$epi_subtype <- "unknown"
+cluster22$epi_subtype[cluster22$seurat_clusters%in%c(1)] <- "basal cell"
+
+cluster22$epi_subtype[cluster22$seurat_clusters%in%c(0)] <- "suprabasal cell"
+table(cluster22$epi_subtype)
+
+kera$epi_subtype <- "Unknown"
+kera$epi_subtype[kera$seurat_clusters%in%c(5,4,7,9,15,18,19,23)] <- "basal cell"
+kera$epi_subtype[kera$seurat_clusters%in%c(1,3,10,13,14,21)]  <-"suprabasal cell"
+kera$epi_subtype[kera$seurat_clusters%in%c(6,17)]  <-"cornified cell"
+
+kera$epi_subtype[kera$seurat_clusters%in%c(8,11,20)]  <-"gland cell"
+kera$epi_subtype[kera$seurat_clusters%in%c(12)]  <-"melanocyte"
+kera$epi_subtype<-cluster2$epi_subtype
+kera$epi_subtype<-cluster16$epi_subtype
+kera$epi_subtype<-cluster22$epi_subtype
+table(kera$epi_subtype)
+
+```
+
+
+
+```{r}
+
+merged_obj$merged_annotation<- kera$epi_subtype
+merged_obj$merged_annotation[merged_obj$merged_annotation%in%c("basal cell","cornified cell","suprabasal cell")] <- "keratinocyte"
+table(merged_obj$merged_annotation)
+merged_obj$epithelialsubtype <- "other"
+merged_obj$epithelialsubtype <- kera$epi_subtype
+merged_obj$epithelialsubtype[merged_obj$epithelialsubtype%in%c("melanocyte","gland cell","immune cell")] <- "other"
+table(merged_obj$epithelialsubtype)
+saveRDS(kera,"/Users/xu/Desktop/1_project/epithelial cell/keratinocyte.rds")
+saveRDS(merged_obj,"/Users/xu/Desktop/1_project/epithelial cell/merged_obj.rds")
+```
+
+```{r}
+data <- readRDS("/Users/xu/Desktop/1_project/fgsea/data/ErlCART_Xenium_DermComp_250414112430.rds")
+table(data$epithelialsubtype)
+identical(data$epithelialsubtype,merged_obj$epithelialsubtype)
+kera1 <- subset(data,epithelialsubtype2!="other")
+all.genes <- rownames(data)
+kera1 <- RunPCA(kera1,features = all.genes)
+Seurat::ElbowPlot(kera1,ndims=50,reduction = "pca")
+kera1 <- FindNeighbors(kera1, dims = 1:25, reduction = "pca")
+kera1 <- FindClusters(kera1, resolution = 1,algorithm = 4)
+kera1 <- RunUMAP(kera1, dims = 1:25, reduction = "pca")
+DimPlot(kera1, reduction="umap",group.by = c("epithelialsubtype2"),alpha = 0.5,label = TRUE,repel = TRUE)
+
+
+epidermisgene <-c("NOTCH3",
+  "KRT5",
+  "FASN","MGST1", "PLIN2","FADS2","ACSBG1" )
+color <-c('#E5D2DD','#53A85F')
+p <- DotPlot(kera1, features = epidermisgene,cols = color, group.by = "epithelialsubtype2"
+)+coord_flip()
+exp <- p$data
+exp$features.plot <- as.factor(exp$features.plot)
+exp$features.plot <- fct_inorder(exp$features.plot)
+desired_order <- c("suprabasal cell","basal cell","epi basal cell","cornified cell")
+exp$id <- factor(exp$id, levels = desired_order)
+colnames(exp)[5] <- 'Expression'
+colnames(exp)[2] <- 'Percentage'
+
+cell_types <- levels(exp$id)  
+xintercepts <- seq(1.5, length(cell_types) - 0.5, by=1)  
+
+pdot <- ggplot(exp, aes(x=id, y=features.plot))+
+  geom_point(aes(size= Percentage, color=Expression))+  
+  geom_point(aes(size=Percentage, color=Expression), shape=21, color="black", stroke=1)+  
+  scale_size_continuous(range = c(2,6))+  
+  theme(panel.grid = element_blank(),  
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_rect(color = 'black', size = 1.2, fill = 'transparent'), 
+        axis.text.x = element_text(family = "Arial", size = 14, color="black", angle=45, hjust = 1,face = "bold"),  
+        axis.text.y = element_text(family = "Arial", size = 14, color="black",face = "bold"),
+        legend.text = element_text(family = "Arial", size = 12 ),   
+  legend.title = element_text(family = "Arial", size = 12),
+  #legend.position = "bottom", 
+      legend.direction = "vertical")+  
+  scale_color_gradientn(colors = colorRampPalette(c("#8CCECE","#BED7A3", "#F5EACE","#F1A5BC","#E8719D"))(100))+  
+  labs(x=NULL, y=NULL)+ 
+  geom_vline(xintercept = xintercepts, linetype="dotted", size=0.8)
+pdot
+ggsave("EPIDERMAL_DOTPLOT.pdf", plot =pdot, width =6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "EPIDERMAL_DOTPLOT.png",
+  plot = pdot,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+
+```
+
