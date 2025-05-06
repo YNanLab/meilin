@@ -1,0 +1,337 @@
+---
+title: "sccomp"
+author: "meilin"
+date: "2025-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(sccomp)
+obj <- readRDS('/Users/xu/Desktop/1_project/fgsea/data/ErlCART_Xenium_DermComp_250414112430.rds')
+non_epi <- obj[,!obj$merged_annotation %in% c('gland cell', 'keratinocyte', 'melanocyte')]
+non_epi@meta.data$fib_celltype <- case_when(non_epi$fibroblast_subtype != 'other' ~ non_epi$fibroblast_subtype,
+                                            .default = non_epi$merged_annotation)
+```
+
+```{r}
+
+
+res = 
+  non_epi |>
+  sccomp_estimate(
+      formula_composition = ~ 0 + fourgroups + (1 | Patient),
+      .sample = SampleId,
+      .cell_group = fib_celltype,
+      bimodal_mean_variability_association = TRUE,
+      cores = 8, verbose = FALSE
+    ) |>
+  sccomp_test(contrasts =  c("fourgroupsSSc_postCART_early - fourgroupsSSc_preCART", 
+                                "fourgroupsSSc_postCART_late - fourgroupsSSc_postCART_early",
+                                "fourgroupsSSc_postCART_superlate - fourgroupsSSc_postCART_late",
+                                "fourgroupsSSc_postCART_superlate - fourgroupsSSc_preCART"))
+plots = plot(res)
+
+
+p1 <- plots$credible_intervals_1D[[1]]
+p2 <- plots$credible_intervals_1D[[2]]
+p3 <- plots$credible_intervals_1D[[3]]
+
+print(p1+ ggsci::scale_color_aaas()+ p2+ggsci::scale_color_aaas()+p3+ggsci::scale_color_aaas())
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+parameters <- unique(res$parameter)
+plots <- list()
+celltype_list <- unique(res$fib_celltype)
+celltype_colors <- c(
+  "#a2d2e7", "#67a8cd", "#ffc17f", "#cf9f88", 
+  "#6fb3a8", "#b3e19b", "#50aa4b", "#ff9d9f",
+  "#f36569", "#3581b7", "#cdb6da", "#704ba3",
+  "#9a7fbd", "#dba9a8", "#e43030", "#e99b78",
+  "#ff8831"
+)[1:length(celltype_list)]  
+names(celltype_colors) <- celltype_list
+
+for (param in parameters) {
+  res1 <- res %>% 
+    filter(parameter == param) %>%
+    arrange(c_effect) %>%
+    mutate(line_color = ifelse(c_FDR < 0.05, "#e58579", "#8ab1d2")) 
+  res1$fib_celltype <- reorder(res1$fib_celltype, res1$c_effect)
+  
+  p <- ggplot(res1, aes(x = c_effect, y = fib_celltype)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = -0.1, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey") +
+    geom_errorbarh(aes(xmin = c_lower, xmax = c_upper, color = line_color), height = 0.2, size = 1) +
+    geom_point(aes(fill = factor(fib_celltype)), color = "white", shape = 21, size = 3) +           
+    scale_fill_manual(values = celltype_colors) +   
+    scale_color_identity() + 
+    labs(x = NULL, y = NULL, title = unique(res1$parameter)) + 
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title = element_text(family = "Arial", size = 14),
+      axis.text = element_text(color="black",family = "Arial", size = 14,face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 8),  
+      legend.position = "none", 
+      axis.line.x = element_line(size = 0.5),  
+      axis.line.y = element_blank() 
+    )
+  
+  plots[[param]] <- p
+}
+
+final_plot <- plots[[1]] + plots[[2]] + plots[[3]]
+
+final_plot
+
+ggsave("3sccomp.pdf", plot = final_plot, width = 18, height =12, units = "in", device = cairo_pdf)
+
+ggsave(
+  filename = "3sccomp.png",
+  plot =  final_plot,
+  width = 18,          
+  height = 12,         
+  dpi = 600           
+)
+
+
+```
+
+```{r}
+plots[[4]]
+
+ggsave("sccomp.pdf", plot = plots[[4]], width = 6, height =6, units = "in", bg="white",device = cairo_pdf)
+ggsave(
+  filename = "sccomp.png",
+  plot =  plots[[4]],
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+```
+```{r}
+fibro <- subset(obj,subset = merged_annotation=="fibroblast")
+res = 
+  fibro |>
+  sccomp_estimate(
+      formula_composition = ~ 0 + fourgroups + (1 | Patient),
+      .sample = SampleId,
+      .cell_group = fibroblast_subtype,
+      bimodal_mean_variability_association = TRUE,
+      cores = 8, verbose = FALSE
+    ) |>
+  sccomp_test(contrasts =  c("fourgroupsSSc_postCART_superlate - fourgroupsSSc_preCART"))
+plots = plot(res)
+p1 <- plots$credible_intervals_1D
+p1
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+parameters <- unique(res$parameter)
+
+celltype_list <- unique(res$fibroblast_subtype)
+celltype_colors <- c(
+  "#a2d2e7", "#67a8cd", "#ffc17f", "#cf9f88", 
+  "#6fb3a8", "#b3e19b", "#50aa4b", "#ff9d9f",
+  "#f36569", "#3581b7", "#cdb6da", "#704ba3",
+  "#9a7fbd", "#dba9a8", "#e43030", "#e99b78",
+  "#ff8831"
+)[1:length(celltype_list)]  
+names(celltype_colors) <- celltype_list
+
+
+  res1 <- res %>% 
+    arrange(c_effect) %>%
+    mutate(line_color = ifelse(c_FDR < 0.05, "#e58579", "#8ab1d2")) 
+  res1$fibroblast_subtype <- reorder(res1$fibroblast_subtype, res1$c_effect)
+  
+
+  p <- ggplot(res1, aes(x = c_effect, y = fibroblast_subtype)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = -0.1, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey") +
+    geom_errorbarh(aes(xmin = c_lower, xmax = c_upper, color = line_color), height = 0.2, size = 1) +
+    geom_point(aes(fill = factor(fibroblast_subtype)), color = "white", shape = 21, size = 3) +           
+    scale_fill_manual(values = celltype_colors) +   
+    scale_color_identity() + 
+    labs(x = NULL, y = NULL, title = unique(res1$parameter)) + 
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title = element_text(family = "Arial", size = 14),
+      axis.text = element_text(color="black",family = "Arial", size = 14,face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 8),  
+      legend.position = "none", 
+      axis.line.x = element_line(size = 0.5),  
+      axis.line.y = element_blank() 
+    )
+  p
+ 
+ggsave("allfibrosccomp.pdf", plot = p, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "allfibrosccomp.png",
+  plot =  p,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+```
+
+```{r}
+fibro <- subset(obj,subset = merged_annotation=="fibroblast")
+papifibro <- subset(fibro,subset = DermComp=="PapiDermis")
+
+res = 
+  papifibro |>
+  sccomp_estimate(
+      formula_composition = ~ 0 + fourgroups + (1 | Patient),
+      .sample = SampleId,
+      .cell_group = fibroblast_subtype,
+      bimodal_mean_variability_association = TRUE,
+      cores = 8, verbose = FALSE
+    ) |>
+  sccomp_test(contrasts =  c("fourgroupsSSc_postCART_superlate - fourgroupsSSc_preCART"))
+plots = plot(res)
+p1 <- plots$credible_intervals_1D
+p1
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+parameters <- unique(res$parameter)
+celltype_list <- unique(res$fibroblast_subtype)
+celltype_colors <- c(
+  "#a2d2e7", "#67a8cd", "#ffc17f", "#cf9f88", 
+  "#6fb3a8", "#b3e19b", "#50aa4b", "#ff9d9f",
+  "#f36569", "#3581b7", "#cdb6da", "#704ba3",
+  "#9a7fbd", "#dba9a8", "#e43030", "#e99b78",
+  "#ff8831"
+)[1:length(celltype_list)]  
+names(celltype_colors) <- celltype_list
+
+  res1 <- res %>% 
+    arrange(c_effect) %>%
+    mutate(line_color = ifelse(c_FDR < 0.05, "#e58579", "#8ab1d2")) 
+  res1$fibroblast_subtype <- reorder(res1$fibroblast_subtype, res1$c_effect)
+
+
+  p <- ggplot(res1, aes(x = c_effect, y = fibroblast_subtype)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = -0.1, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey") +
+    geom_errorbarh(aes(xmin = c_lower, xmax = c_upper, color = line_color), height = 0.2, size = 1) +
+    geom_point(aes(fill = factor(fibroblast_subtype)), color = "white", shape = 21, size = 3) +           
+    scale_fill_manual(values = celltype_colors) +   
+    scale_color_identity() + 
+    labs(x = NULL, y = NULL, title = unique(res1$parameter)) + 
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title = element_text(family = "Arial", size = 14),
+      axis.text = element_text(color="black",family = "Arial", size = 14,face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 8),  
+      legend.position = "none", 
+      axis.line.x = element_line(size = 0.5),  
+      axis.line.y = element_blank() 
+    )
+  p
+ 
+ggsave("papifibrosccomp.pdf", plot = p, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "papifibrosccomp.png",
+  plot =  p,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+```
+
+
+
+```{r}
+
+retifibro <- subset(fibro,subset = DermComp=="RetiDermis")
+
+res = 
+  retifibro |>
+  sccomp_estimate(
+      formula_composition = ~ 0 + fourgroups + (1 | Patient),
+      .sample = SampleId,
+      .cell_group = fibroblast_subtype,
+      bimodal_mean_variability_association = TRUE,
+      cores = 8, verbose = FALSE
+    ) |>
+  sccomp_test(contrasts =  c("fourgroupsSSc_postCART_superlate - fourgroupsSSc_preCART"))
+plots = plot(res)
+p1 <- plots$credible_intervals_1D
+p1
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+parameters <- unique(res$parameter)
+
+celltype_list <- unique(res$fibroblast_subtype)
+celltype_colors <- c(
+  "#a2d2e7", "#67a8cd", "#ffc17f", "#cf9f88", 
+  "#6fb3a8", "#b3e19b", "#50aa4b", "#ff9d9f",
+  "#f36569", "#3581b7", "#cdb6da", "#704ba3",
+  "#9a7fbd", "#dba9a8", "#e43030", "#e99b78",
+  "#ff8831"
+)[1:length(celltype_list)]  
+names(celltype_colors) <- celltype_list
+
+
+  res1 <- res %>% 
+    arrange(c_effect) %>%
+    mutate(line_color = ifelse(c_FDR < 0.05, "#e58579", "#8ab1d2")) 
+  res1$fibroblast_subtype <- reorder(res1$fibroblast_subtype, res1$c_effect)
+  
+
+  p <- ggplot(res1, aes(x = c_effect, y = fibroblast_subtype)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = -0.1, linetype = "dashed", color = "grey") +
+    geom_vline(xintercept = 0.1, linetype = "dashed", color = "grey") +
+    geom_errorbarh(aes(xmin = c_lower, xmax = c_upper, color = line_color), height = 0.2, size = 1) +
+    geom_point(aes(fill = factor(fibroblast_subtype)), color = "white", shape = 21, size = 3) +           
+    scale_fill_manual(values = celltype_colors) +   
+    scale_color_identity() + 
+    labs(x = NULL, y = NULL, title = unique(res1$parameter)) + 
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title = element_text(family = "Arial", size = 14),
+      axis.text = element_text(color="black",family = "Arial", size = 14,face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 8),  
+      legend.position = "none", 
+      axis.line.x = element_line(size = 0.5),  
+      axis.line.y = element_blank() 
+    )
+  p
+ 
+ggsave("retifibrosccomp.pdf", plot = p, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "retifibrosccomp.png",
+  plot =  p,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+```
+
+
