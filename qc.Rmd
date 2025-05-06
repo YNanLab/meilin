@@ -1,0 +1,133 @@
+---
+title: "qc for seurat spatial data"
+author: "meilin"
+date: "2025-03-12"
+output: html_document
+---
+
+```{r setup, include=FALSE,results='hide'}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE,echo=TRUE) 
+```
+
+```{r preparation}
+library(Seurat)
+library(ggplot2)
+library(ggforce)
+
+color <- c("#f5efbd","#fabcbd","#7bd3f7","#deb5cb","#c4cbe5","#ffd476","#d1ebc6")
+seurat<- readRDS("/Users/xu/Desktop/CART/data/seuratrawdata/TMADerma2C1_6_Xenium_seurat_250317234200.rds")
+
+```
+  
+```{r area threshold}
+area_threshold <- list(
+                           Area_minthresholds= c(
+                                                  SSc213=9,
+                                                  SSc224=10,
+                                                  SSc214=8.5,
+                                                  SSc225=9.2,
+                                                  HAUCK=12,
+                                                  SSc223=12),
+                            
+                            Area_maxthresholds= c(
+                                                  SSc213=260,
+                                                  SSc224=240,
+                                                  SSc214=330,
+                                                  SSc225=240,
+                                                  HAUCK=240,
+                                                  SSc223=270
+                            ))
+seurat_subsets <- list()
+for (i in unique(seurat$SampleId)) {
+  current_sample <- seurat[, seurat$SampleId == i]
+  min_area <- unname(area_threshold$Area_minthresholds[as.character(i)])
+  max_area <- unname(area_threshold$Area_maxthresholds[as.character(i)])
+  
+  if (is.na(min_area) | is.na(max_area)) {
+    cat("❌ WARNING: Thresholds missing for sample", i, "\n")
+    next
+  }
+  cat("  Area range in data: ", range(current_sample$area_cell, na.rm = TRUE), "\n")
+  filtered_cells <- current_sample[, 
+                                   !is.na(current_sample$area_cell) &
+                                   current_sample$area_cell > min_area&                                    current_sample$area_cell < max_area]
+  
+  cat("  Cells before filtering:", ncol(current_sample), "\n")
+  cat("  Cells after filtering:", ncol(filtered_cells), "\n")
+
+  if (ncol(filtered_cells) > 0) {
+    seurat_subsets[[i]] <- filtered_cells
+  } else {
+    cat("⚠️ WARNING: No cells passed filtering for sample", i, "\n")
+  }
+}
+
+if (length(seurat_subsets) > 0) {
+  seurat_filtered <- Reduce(function(x, y) merge(x, y), seurat_subsets)
+  seurat_step1 <- seurat_filtered
+} else {
+  cat("⚠️ ERROR: No cells passed the threshold! Check your area values.\n")
+seurat_step1 <-seurat
+  }
+
+seurat_step1 <- JoinLayers(seurat_step1)
+
+```
+
+```{r visualize}
+palette <- c("Included" = "#9d9ecd", "Excluded" = "#ed6f6e")
+
+for (sample_id in unique(seurat$SampleId)) {
+  current_sample <- seurat[, seurat$SampleId == sample_id]
+  min_area <- unname(area_threshold$Area_minthresholds[sample_id])
+  max_area <- unname(area_threshold$Area_maxthresholds[sample_id])
+  current_sample$area_category <- factor(ifelse(
+    !is.na(current_sample$area_cell) &
+    (current_sample$area_cell < min_area | current_sample$area_cell > max_area ), 
+    "Excluded", "Included"))
+  print(ImageDimPlot(current_sample, boundaries = 'segmentations',
+             group.by = 'area_category', border.color = NA, dark.background = FALSE,cols = palette)+ggtitle(sample_id))
+    
+}
+```
+
+
+```{r}
+selected_controlcolumns <- seurat_step1@meta.data[, c("nCount_BlankCodeword", "nCount_ControlCodeword", "nCount_ControlProbe","nCount_GenomicControl") ]
+neg_sys_control <- apply(selected_controlcolumns, 1, sum)
+
+seurat_step1@meta.data$prop_neg <- ifelse((seurat_step1$nCount_Xenium+neg_sys_control) ==0, 0, neg_sys_control / (seurat_step1$nCount_Xenium+neg_sys_control))
+metadata <- seurat_step1@meta.data
+ggplot(metadata, aes(x = prop_neg)) +
+  geom_histogram(binwidth = 0.1, fill = "#9d9ecd", color = "white", position = "identity") +
+  xlim(0, 1) +
+   scale_x_continuous(trans = "log10") + 
+  xlab("prop_neg") +  
+  geom_vline(xintercept = 0.005, linetype = 2, color = "red") +
+ theme_bw() +  
+  theme(panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank())
+
+seurat_step2 <- seurat_step1[,seurat_step1$prop_neg < 0.01]
+
+```
+
+```{r lowcount cells,echo=TRUE}
+metadata <- seurat_step2@meta.data
+ggplot(as.data.frame(metadata), aes(x = nFeature_Xenium)) +
+  geom_histogram(binwidth = 5, fill = "#9d9ecd", color = "white", position = "identity") +
+  xlim(0, 200) +
+    xlab("feature_real") +  
+  geom_vline(xintercept = 25, linetype = 2, color = "red") +
+ theme_bw() +  
+  theme(panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank())  
+
+seurat_step3 <- seurat_step2[,seurat_step2$nFeature_Xenium>25]
+dim(seurat_step3) 
+cell_names <- Cells(seurat_step3)
+seurat_qc <-subset(seurat, cells = cell_names)
+seurat_qc
+saveRDS(seurat_qc,"/Users/xu/Desktop/CART/data/seuratrawdata/batch2_afterqcdata.rds")
+
+```
