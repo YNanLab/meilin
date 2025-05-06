@@ -1,0 +1,290 @@
+---
+title: "response score"
+author: "meilin"
+date: "2025-04-22"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(gghalves)
+library(ggrepel)
+
+data<- readRDS("/Users/xu/Desktop/1_project/ErlCART_Xenium_ResScore_250402184029.rds")
+obj <- data
+ordercolors<- c("#84c3b7","#b8aeeb","#f57c6e","#f8bb6e","#88d8db","#f2a7da","#add187","#8481ba","#e74434","#f8c7b4","#71b7ed", "#cedfef","#1864aa","#ee7e18","#4a94c6","#fae69e")
+
+
+selected_columns <- c( "merged_annotation" ,"CARTacute" ,"CARTsustained") 
+metadata_df <- data@meta.data[, selected_columns] %>% as.data.frame()
+
+p <- ggplot(data = metadata_df,  
+       aes(x=merged_annotation, y=CARTacute, fill=merged_annotation)) +
+  
+  geom_half_violin(side = "r", color=NA, alpha=0.4) +
+  
+  geom_half_boxplot(side = "r", errorbar.draw = FALSE, width=0.2, linewidth=0.8) +
+  
+  geom_half_point_panel(side = "l", shape=21, size=3, color="white") +
+  
+  scale_fill_manual(values = ordercolors,name = "Major Celltype") +
+
+  
+  labs(y=NULL,x=NULL,title = "Acute CAR-T response") +
+  
+  rotate_x_text(angle = 45)+ 
+  
+  geom_hline(yintercept = mean(metadata_df$`CARTacute`), linetype=2)+
+
+  theme(plot.title = element_text(hjust = 0.5,size = 16, face = "bold"),
+        legend.position = "none",
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text=element_text(size=14,color="black",face="bold",family = "Arial"),
+        axis.title.y = element_text(color="black", size=14, face="bold"),
+        axis.line = element_line(size=0.8, colour = "black"))
+p
+ggsave("Acute CAR-T response.pdf", plot = p, width = 12, height =5, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "Acute CAR-T response.png",
+  plot = p,
+  width = 12,          
+  height = 8,         
+  dpi = 600           
+)
+```
+
+```{r}
+p1 <- ggplot(data = metadata_df,  
+       aes(x=merged_annotation, y=CARTsustained, fill=merged_annotation)) +
+  
+  geom_half_violin(side = "r", color=NA, alpha=0.4) +
+  
+  geom_half_boxplot(side = "r", errorbar.draw = FALSE, width=0.2, linewidth=0.8) +
+ 
+  geom_half_point_panel(side = "l", shape=21, size=3, color="white") +
+  
+  scale_fill_manual(values = ordercolors,name = "Major Celltype") +
+  
+  labs(y=NULL,x=NULL,title = "Sustained CAR-T response") +
+
+  rotate_x_text(angle = 45)+ 
+  geom_hline(yintercept = mean(metadata_df$`CARTsustained`), linetype=2)+
+  theme(plot.title = element_text(hjust = 0.5,size = 16, face = "bold"),
+        legend.position = "bottom",
+        panel.background = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text=element_text(size=12,color="black"),
+        axis.title.y = element_text(color="black", size=14, face="bold"),
+        axis.line = element_line(size=0.8, colour = "black"))
+p1
+#ggsave("Sustained CAR-T response.pdf", plot = p1, width = 12, height =5, units = "in", device = cairo_pdf)
+```
+
+```{r}
+library(MASS)
+library(viridis)
+library(spatialEco)
+library(sf)
+library(ggsci)
+
+res_score <- data.frame(acute = obj$CARTacute, sample_id = obj$SampleId)
+coords <- do.call(rbind, lapply(Images(obj), function(i)GetTissueCoordinates(obj, i)))
+coords <- coords[match(colnames(obj), coords$cell),] %>% column_to_rownames('cell')
+res_score <- cbind(res_score, coords)
+
+types <- unique(obj$merged_annotation)
+cols <- pal_nejm()(length(types)) %>% setNames(types)
+
+
+for (i in unique(obj$SampleId)) {
+  cat('\n\n###', i, '\n\n')
+  
+  scores <- res_score[res_score$sample_id == i, ]
+  scores <- sf::st_as_sf(scores, coords = c('x', 'y'))
+  acute <- sp.kde(scores,
+                  y = scores$acute,
+                  res = 8,
+                  scale.factor = 1000)
+  acute <- as.data.frame(acute, xy = TRUE)
+  
+  tmp <- obj[, obj$SampleId == i]
+  
+  group <- obj@meta.data[obj$SampleId == i, 'fourgroups'][1]
+  pid <- obj@meta.data[obj$SampleId == i, 'Patient'][1]
+  
+  
+  polys <- tmp[[Images(tmp)[[1]]]][['segmentations']]@polygons %>% SpatialPolygons() %>% sf::st_as_sf()
+  
+  breaks <-  c(-3.5, -1, 0,1, 3.5)
+  colors <- c("#7cc042",
+  '#bcda8c40',
+  '#00000000',  
+  "#cbb2d840","#8278b7")
+  labels <- c("-2","-1", "0", "1","2") 
+  p1 <- ggplot() +
+    # Plot the spatial polygons (boundaries)
+    geom_sf(data = polys, fill = 'lightgrey', size = 0) +  # Adjust color and size
+    # Plot the KDE (density estimation) with geom_tile
+    geom_tile(data = acute, aes(
+      x = x,
+      y = y,
+      fill = z
+    )) +  
+    scale_fill_gradientn(
+      colors = colors,
+      values = scales::rescale_mid(breaks, mid = 0),
+    breaks = breaks,
+     labels = labels, 
+    limits = c(-3.5, 3.5), oob = scales::squish) +
+    theme_minimal() +
+    theme(
+      axis.text = element_blank(),
+      # Remove axis text
+      axis.title = element_blank(),
+      # Remove axis titles
+      axis.ticks = element_blank(),
+      # Remove axis ticks
+      panel.grid = element_blank(),
+      # Remove grid lines
+    legend.position = "bottom") +
+    ggtitle(paste0(i, ' - ', group,' - acute CART'))
+  
+  print(p1)
+if (i == "SSc213") {
+    ggsave(paste0(i, "_acute_CART.png"), plot = p1, width = 8, height = 6, dpi = 600)
+  ggsave(p1,file=paste0(i, "_acute_CART.pdf"),width=8,height=6)
+  }
+  
+
+}
+```
+
+
+```{r}
+obj$IsFib <- as.numeric(obj$fibroblast_subtype != 'other')
+res_score <- data.frame( Fib = obj$IsFib, sample_id = obj$SampleId)
+coords <- do.call(rbind, lapply(Images(obj), function(i)GetTissueCoordinates(obj, i)))
+coords <- coords[match(colnames(obj), coords$cell),] %>% column_to_rownames('cell')
+res_score <- cbind(res_score, coords)
+
+types <- unique(obj$merged_annotation)
+cols <- pal_nejm()(length(types)) %>% setNames(types)
+
+for (i in unique(obj$SampleId)) {
+  cat('\n\n###', i, '\n\n')
+  
+  scores <- res_score[res_score$sample_id == i, ]
+  scores <- sf::st_as_sf(scores, coords = c('x', 'y'))
+
+  fib <- sp.kde(
+    scores,
+    y = scores$Fib,
+    res = 8,
+    scale.factor = 1000
+  )
+  fib <- as.data.frame(fib, xy = TRUE)
+  
+  
+  tmp <- obj[, obj$SampleId == i]
+  
+  group <- obj@meta.data[obj$SampleId == i, 'fourgroups'][1]
+  pid <- obj@meta.data[obj$SampleId == i, 'Patient'][1]
+  
+  
+  polys <- tmp[[Images(tmp)[[1]]]][['segmentations']]@polygons %>% SpatialPolygons() %>% sf::st_as_sf()
+  
+ breaks <- c(-0.9, -0.5, 0, 0.5, 0.9)
+  colors <- c("#7cc042",
+  '#bcda8c40',
+  '#00000000',  
+  "#cbb2d840","#8278b7")
+  
+  
+  p2 <- ggplot() +
+    # Plot the spatial polygons (boundaries)
+    geom_sf(data = polys, fill = 'grey80') +  # Adjust color and size
+    # Plot the KDE (density estimation) with geom_tile
+    geom_tile(data = fib, aes(
+      x = x,
+      y = y,
+      fill = z
+    )) + 
+    scale_fill_gradientn(
+    colors = colors,
+    values =  scales::rescale_mid(breaks, mid = 0),
+    limits = c(-2.5, 2.5), oob = scales::squish) + 
+    theme_minimal() +
+    theme(
+      axis.text = element_blank(),
+      # Remove axis text
+      axis.title = element_blank(),
+      # Remove axis titles
+      axis.ticks = element_blank(),
+      # Remove axis ticks
+      panel.grid = element_blank(),
+      # Remove grid lines
+      panel.border = element_blank(),
+   
+    legend.position = "bottom") +
+    ggtitle(paste0(i, ' - ', group,' - fibroblast density'))
+   print(p2)
+  if (i == "SSc213") {
+    ggsave(paste0(i, "_fibroblast density.png"), plot = p2, width = 8, height = 6, dpi = 600)
+  ggsave(p2,file=paste0(i, "_fibroblast density.pdf"),width=8,height=6)
+  }
+  
+  
+ }
+
+```
+
+
+```{r}
+library(scCustomize)
+library(cowplot)
+color_pal <- colorRampPalette(c("#dedeea", "#bcb9d8","#8488b5","#61678b"))(50)
+
+
+
+p <- FeaturePlot_scCustom(
+  seurat_object = data,
+  features = "CARTacute",
+  order = TRUE,
+  colors_use = color_pal,
+  alpha_exp = 0.4
+  #na_cutoff = FALSE
+) +
+  NoAxes() +
+  theme(legend.position = "bottom", legend.justification = "center") 
+
+
+arrow <- arrow(angle = 20, type = "closed", length = unit(0.1, "npc"))
+umap_coord <- ggplot(tibble(group = c("UMAP_1", "UMAP_2"),
+                            x = c(0, 0), xend = c(1, 0),
+                            y = c(0, 0), yend = c(0, 1),
+                            lx = c(0.5, -0.15), ly = c(-0.15, 0.5),
+                            angle = c(0, 90))) +
+  geom_segment(aes(x, y, xend = xend, yend = yend, group = group),
+               arrow = arrow, size = 1, lineend = "round") +
+  geom_text(aes(lx, ly, label = group, angle = angle), size = 4) +
+  theme_void() +
+  coord_fixed(xlim = c(-0.3, 1), ylim = c(-0.3, 1))
+p_full <- ggdraw() +
+  draw_plot(p + NoAxes(), scale = 0.9) +
+  draw_plot(umap_coord, x = 0.05, y = 0.05, width = 0.2, height = 0.2)
+p_full 
+
+ggsave(p_full,file="acutescore_featureplot.pdf",width=8,height=6)
+ggsave(
+  filename = "acutescore_featureplot.png",
+  plot = p_full,
+  width = 8,          
+  height = 6,         
+  dpi = 600           
+)
+```
+
