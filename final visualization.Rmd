@@ -1,0 +1,240 @@
+---
+title: "dotplot for fsea"
+author: "meilin"
+date: "2025-04-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+
+```
+
+```{r ts}
+ptm <- proc.time()
+tstamp <- format(Sys.time(), '%y%m%d%H%M%S')
+
+```
+  
+```{r data}
+library(tidyverse)
+
+path <- c("/Users/xu/Desktop/data/20250416_ErlCARTXenium_epibasal_earlyvspre_FgseaRes_250507142505.rds",
+          "/Users/xu/Desktop/data/20250416_ErlCARTXenium_epibasal_superlatevspre_FgseaRes_250507142216.rds",
+          "/Users/xu/Desktop/data/20250416_ErlCARTXenium_supra_earlyvspre_FgseaRes_250507143203.rds",
+          "/Users/xu/Desktop/data/20250416_ErlCARTXenium_supra_superlatevspre_FgseaRes_250507143450.rds",
+          "/Users/xu/Desktop/data/20250430_ErlCARTXenium_epidermal_earlyvspre_FgseaRes_250507135750.rds",
+          "/Users/xu/Desktop/data/20250430_ErlCARTXenium_epidermal_superlatevspre_FgseaRes_250507140901.rds"
+          )
+all_data <- map_dfr(path, readRDS)
+
+
+
+```
+
+```{r process data}
+library(ggsci)
+library(ggnewscale)
+library(ggforce)  
+library(ggpubr)   
+library(ggh4x)
+data <- filter(all_data, pathway %in% c(
+ 
+  "EXTRACELLULAR MATRIX ORGANIZATION%REACTOME",
+  "EXTRACELLULAR STRUCTURE ORGANIZATION%GOBP",
+  
+  #immune
+  "IMMUNE RESPONSE%GOBP",
+  "LEUKOCYTE ACTIVATION%GOBP",
+  "INTERFERON SIGNALING%REACTOME DATABASE ID RELEASE 91",
+  
+  
+  #development
+  
+  "TISSUE DEVELOPMENT%GOBP",
+  "REGULATION OF BMP SIGNALING PATHWAY%GOBP",
+ "CELL DEVELOPMENT%GOBP",
+   #neuron
+  
+  "NEURONAL SYSTEM%REACTOME",
+  "NERVOUS SYSTEM DEVELOPMENT%GOBP",
+  "NEUROGENESIS%GOBP",
+  "REGULATION OF NEURON DIFFERENTIATION%GOBP",
+  
+  #wnt
+ 
+ "WNT SIGNALING PATHWAY%GOBP",
+  
+  #angiogenesis
+  "BLOOD VESSEL DEVELOPMENT%GOBP",
+  "VASCULATURE DEVELOPMENT%GOBP"
+  
+  )) %>%
+   mutate(name = sub("%.*", "", pathway), logp = -log10(pval))
+
+data <- mutate(data,
+               cols = ifelse(logp > 3, 3, logp), 
+               type = ifelse(NES>0, 'act', 'deact'),
+               AbsNES = abs(NES)) %>%
+  filter(pval < .05)
+
+data$name <- factor(data$name, levels = c(#ecm
+  
+  
+  #immune
+  "IMMUNE RESPONSE",
+  
+  "LEUKOCYTE ACTIVATION",
+  "INTERFERON SIGNALING",
+  
+  
+  #development
+  "CELL DEVELOPMENT",
+  "TISSUE DEVELOPMENT",
+  "REGULATION OF BMP SIGNALING PATHWAY",
+  #neuron
+  "NEURONAL SYSTEM",
+  "NERVOUS SYSTEM DEVELOPMENT",
+  "NEUROGENESIS",
+  "REGULATION OF NEURON DIFFERENTIATION",
+  
+  #wnt
+
+ "WNT SIGNALING PATHWAY",
+  
+  #angiogenesis
+  "BLOOD VESSEL DEVELOPMENT",
+  "VASCULATURE DEVELOPMENT",
+  
+ "EXTRACELLULAR MATRIX ORGANIZATION",
+  "EXTRACELLULAR STRUCTURE ORGANIZATION"
+  
+  ))
+data$celltype[data$celltype=="epithelial cell"] <- "epidermal cell"
+unique(data$celltype)
+data$celltype <- factor(
+  data$celltype,
+  levels = c(
+    "epibasal cell","suprabasal cell","epidermal cell"
+  )
+)
+#
+group1 <- c(
+   "CELL DEVELOPMENT",
+  "TISSUE DEVELOPMENT",
+  "REGULATION OF BMP SIGNALING PATHWAY",
+  "WNT SIGNALING PATHWAY",
+  "NEURONAL SYSTEM",
+  "NERVOUS SYSTEM DEVELOPMENT",
+  "NEUROGENESIS",
+  "REGULATION OF NEURON DIFFERENTIATION",
+   "BLOOD VESSEL DEVELOPMENT",
+  "VASCULATURE DEVELOPMENT")
+group2 <- c("EXTRACELLULAR MATRIX ORGANIZATION",
+  "EXTRACELLULAR STRUCTURE ORGANIZATION"
+  )
+group3 <- c("IMMUNE RESPONSE",
+  "LEUKOCYTE ACTIVATION",
+  "INTERFERON SIGNALING"
+  )
+
+
+ 
+ 
+data <- data %>%
+  mutate(category = case_when(
+    name %in% group1 ~ "Development Related",
+    name %in% group2 ~  "Fibrosis Related",
+    name %in% group3 ~ "Immune Response",
+    TRUE ~ "Other"
+  ))
+data$category <- factor(data$category,levels = c("Immune Response","Development Related","Fibrosis Related"))
+
+#
+data$comparison[data$comparison == 'early_vs_pre'] <- "1m FU vs BL"
+data$comparison[data$comparison == 'superlate_vs_pre'] <- "12m FU vs BL"
+data$comparison <- factor(data$comparison,levels=c("1m FU vs BL","12m FU vs BL"))
+```
+
+
+
+```{r fig2}
+library(ggplot2)
+library(dplyr)
+library(ggh4x)
+library(ggnewscale)
+library(ggpubr)
+colors <- c(rep("#5E90B8",3),
+           rep("#66c2a5",10),
+           rep("#E77C8E",2)
+           )
+
+p1 <- ggplot() +
+  geom_point(
+    data = filter(data, NES > 0),
+    aes(x = celltype, y = interaction(name,category ), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#edb8b0", "#e69191","#c25759"))(50),
+    name = "-log10(p)\n(activated)   ",
+   limits = c(3, 5) ,
+  oob = scales::squish) +
+  new_scale_fill() +
+  geom_point(
+    data = filter(data, NES < 0),
+    aes(x = celltype, y = interaction(name,category), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#aecfd4", "#92b5ca", "#599cb4"))(50),
+    name = "-log10(p)\n(Deactivated)   ",
+   limits = c(3,5) ,
+  oob = scales::squish
+    ) +
+ 
+  ggh4x::facet_grid2(. ~ comparison, scales = "free", space = "free", switch = "x",
+    strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "#599cb4"),  
+        element_rect(fill = "#c25759")
+      )
+    )
+  ) +
+  guides(y = "axis_nested") +  
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", linewidth = 1),
+    strip.background.x = element_rect(color = "white"),
+    strip.placement = "outside",
+    strip.text.x = element_text(size = 13, color = "black", face = "bold"),
+    strip.text = element_text(color = "black", face = "bold", size = 14,family = "Arial"),
+    axis.text.x = element_text(angle = 45, color = "black", size = 14, hjust = 1,family = "Arial", face = "bold"), 
+    axis.text.y = element_text(color = colors, size = 14, vjust = 0.5,family = "Arial", face = "bold"),
+    axis.ticks = element_blank(),
+    legend.title =  element_text(
+    size = 12,
+    margin = margin(b = 10), 
+    family = "Arial"
+  ),
+    legend.text = element_text(size = 12,family = "Arial"),
+  legend.position = "bottom",
+  legend.box = "vertical",  # ⬅️ 关键设置，改成竖排
+  
+    ggh4x.axis.nestline.y = element_line(size = 0.6),
+    ggh4x.axis.nesttext.y = element_text(colour = c("#5E90B8","#66c2a5", "#E77C8E"))
+  ) +
+  
+  labs(x = NULL, y = NULL) 
+p1
+ggsave("1epidermal cell fgsea with catagory.pdf", plot = p1, width = 12, height =8, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "1epidermal cell fgsea with catagory.png",
+  plot =  p1,
+  width = 12,          
+  height = 8,         
+  dpi = 600           
+)
+```
+
