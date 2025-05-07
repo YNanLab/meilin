@@ -1,0 +1,149 @@
+---
+title: "epibasal early vs pre"
+author: "meilin"
+date: "2025-04-16"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+
+```
+
+
+
+```{r, echo=FALSE,include = FALSE}
+library(DT)
+library(knitr)
+# You need this code to conduct the magic dependences attaching...
+    datatable(
+      as.data.frame(1),
+      options = list(pageLength = 50, searchHighlight = TRUE,
+  buttons = c('csv'),dom = 'Bfrtip'),extensions="Buttons"
+      )
+```  
+
+
+
+```{r ts}
+ptm <- proc.time()
+tstamp <- format(Sys.time(), '%y%m%d%H%M%S')
+
+```
+  
+This document is generated with the timestamp ``r tstamp``.
+
+
+
+## Data
+
+
+```{r data}
+library(Seurat)
+library(tidyverse)
+
+obj <- readRDS('/Users/xu/Desktop/1_project/fgsea/data/ErlCART_Xenium_DermComp_250414112430.rds')
+epibasal<- obj[,obj$epithelialsubtype2== 'epi basal cell']
+rm(obj)
+gc()
+
+
+```
+
+
+## Gene set from Bader lab
+  
+```{r decoupler}
+bader <- read_lines('/Users/xu/Desktop/1_project/fgsea/data/Human_GOBP_AllPathways_noPFOCR_no_GO_iea_March_01_2025_symbol.gmt')
+bader_net <- bader %>%
+  map_df(~ {
+    # Split each line by tab
+    line <- str_split(.x, "\t", simplify = TRUE)
+    tibble(
+      pathway = line[1],               # Pathway name
+      gene = line[-(1:2)]              # Genes (skip first 2 columns: name and description)
+    )
+  }) %>%
+  unnest(cols = gene) %>%              # Expand list-column into rows
+  filter(gene != "")                   # Remove empty entries if any
+bader_net <- bader_net %>%
+  separate(pathway, into = c("pathway_name", "source", "description"), sep = "%", fill = "right") %>%
+  unite('pathway', c('pathway_name', 'source'), sep = '%')
+bader_net <- bader_net %>%
+  distinct(pathway, gene, .keep_all = TRUE)
+
+
+bader_net <- filter(bader_net, gene %in% rownames(epibasal))
+
+bader_net<- bader_net %>% split(x = .$gene, f = .$pathway)
+
+
+```
+
+
+```{r}
+library(presto)
+library(fgsea)
+
+Idents(epibasal) <- epibasal$fourgroups
+
+
+cat("Running DE for epibasal cells: early vs pre\n")
+mark <- FindMarkers(epibasal, ident.1 = "SSc_postCART_early", ident.2 = "SSc_preCART") %>%
+  arrange(desc(avg_log2FC))
+rank <- setNames(mark$avg_log2FC, rownames(mark))
+fgsea_res <- fgsea(bader_net, stats = rank, minSize = 15, maxSize = 500) %>%
+  as_tibble() %>%
+  arrange(padj) %>%
+  mutate(comparison = "1m FU vs BL", celltype = "epibasal cell")
+
+```
+
+
+
+
+
+## DEG-fgsea
+## Results
+  
+  
+```{r res}
+knit_print(datatable(
+  fgsea_res,
+  filter = 'top',
+  options = list(
+    pageLength = 20,
+    searchHighlight = TRUE,
+    dom = 'Bfrtip',
+    buttons = c('csv', 'excel')
+  ),
+  extensions = "Buttons"
+))
+
+```
+
+
+## Output
+  
+```{r export}
+
+saveRDS(fgsea_res, paste0('/Users/xu/Desktop/1_project/fgsea/data/20250416_ErlCARTXenium_epibasal_earlyvspre_FgseaRes_', tstamp, '.rds'))
+
+```
+
+
+## Session information
+```{r session}
+etm <- proc.time() - ptm
+cat('This analysis took :', etm[3], 's \n')
+sessioninfo::session_info()
+```
+
+
+
+```{bash render, eval = FALSE}
+Rscript -e "rmarkdown::render('script/2.epibasal early vs pre.Rmd', output_file = 'html/20250416_ErlCART_Xenium_epibasal_early_pre_FgseaRes_$(date +"%Y%m%d_%H%M%S").html')" > html/logs/fgsea_$(date +"%Y%m%d_%H%M%S").log 2>&1
+```
+  
