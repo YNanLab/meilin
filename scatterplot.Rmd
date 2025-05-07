@@ -1,0 +1,302 @@
+---
+title: "gam"
+author: "meilin"
+date: "2025-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(parallelly)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(purrr)
+library(stringr)
+data <- readRDS("/Users/xu/Desktop/1_project/fgsea/data/ErlCART_Xenium_DermComp_250414112430.rds")
+fibroblast <-  subset(data,merged_annotation=="fibroblast")
+fibroblast$DaysSinceCART <- case_when(fibroblast$SampleId == 'HAUCK' ~ 128,
+                                fibroblast$SampleId == 'SSc213' ~ 37,
+                                fibroblast$SampleId == 'SSc214' ~ 0,
+                                fibroblast$SampleId == 'SSc223' ~ 126,
+                                fibroblast$SampleId == 'SSc224' ~ 182,
+                                fibroblast$SampleId == 'SSc225' ~ 35,
+                                fibroblast$SampleId == 'SSc230' ~ 0,
+                                fibroblast$SampleId == 'SSc233' ~ 56,
+                                fibroblast$SampleId == 'SSc234' ~ 0,
+                                fibroblast$SampleId == 'SSc237' ~ 29,
+                                fibroblast$SampleId == 'SSc239' ~ 406,
+                                fibroblast$SampleId == 'SSc240' ~ 527,
+                                fibroblast$SampleId == 'SSc241' ~ 363,
+                               fibroblast$SampleId == 'SSc244' ~ 0,
+                                fibroblast$SampleId == 'SSc246' ~ 0,
+                                fibroblast$SampleId == 'SSc247' ~ 169,
+                                fibroblast$SampleId == 'SSc248' ~ 28,
+                                fibroblast$SampleId == 'SSc249' ~ 266,
+                                fibroblast$SampleId == 'SSc250' ~ 0,
+                                fibroblast$SampleId == 'SSc253' ~ 0,
+                                fibroblast$SampleId == 'SSc256' ~ 28,
+                                fibroblast$SampleId == 'SSc261' ~ 28,
+                                fibroblast$SampleId == 'SSc264' ~ 30,
+                                .default = NA)
+```
+
+```{r}
+bader <- read_lines('/Users/xu/Desktop/1_project/fgsea/data/Human_GOBP_AllPathways_noPFOCR_no_GO_iea_March_01_2025_symbol.gmt')
+bader_net <- bader %>%
+  map_df(~ {
+    # Split each line by tab
+    line <- str_split(.x, "\t", simplify = TRUE)
+    tibble(
+      pathway = line[1],               # Pathway name
+      gene = line[-(1:2)]              # Genes (skip first 2 columns: name and description)
+    )
+  }) %>%
+  unnest(cols = gene) %>%              # Expand list-column into rows
+  filter(gene != "")                   # Remove empty entries if any
+bader_net <- bader_net %>%
+  separate(pathway, into = c("pathway_name", "source", "description"), sep = "%", fill = "right") %>%
+  unite('pathway', c('pathway_name', 'source'), sep = '%')
+bader_net <- bader_net %>%
+  distinct(pathway, gene, .keep_all = TRUE)
+
+
+bader_net <- filter(bader_net, gene %in% rownames(fibroblast))
+
+bader_net<- bader_net %>% split(x = .$gene, f = .$pathway)
+
+EPIDERMIS_DEVELOPMENT <- bader_net[['EPIDERMIS DEVELOPMENT%GOBP']]
+T_CELL_ACTIVATION <- bader_net[['T CELL ACTIVATION%GOBP']]
+COLLAGEN_FORMATION <- bader_net[['COLLAGEN FORMATION%REACTOME']]
+```
+
+```{r col8 for pathway}
+
+col8 <- subset(fibroblast,fibroblast_subtype=="COL8A1+")
+col81 <- Seurat::PseudobulkExpression(col8, assays = 'Xenium',
+                                   group.by = c( "SampleId"),
+                                   normalization.method = 'LogNormalize',
+                                   scale.factor = 300)
+
+targets <- COLLAGEN_FORMATION
+
+net1 <- data.frame(
+  source = rep("COLLAGEN FORMATION", length(targets)),
+  target = targets
+)
+
+
+mat1 <- as.matrix(col81[[1]])
+net1 <- filter(net1, net1$target %in% rownames(mat1))
+acts8 <- decoupleR::run_aucell(
+  mat = mat1,
+ net = net1,
+  .source = source,
+  .target = target,
+  aucMaxRank = ceiling(0.05 * nrow(mat1)),
+  nproc = availableCores(),
+  seed = 42,
+  minsize = 5
+)
+metadata8 <- col8@meta.data
+mapping <- metadata8  %>%
+  dplyr::select(Patient, SampleId,DaysSinceCART) %>%
+  distinct()
+
+acts8 <- acts8 %>%
+  rename(SampleId =condition) %>%
+  left_join(mapping, by = "SampleId")
+
+```
+
+```{r col8 day and pseudo}
+p1 <- ggplot(acts8, aes(x = DaysSinceCART, y = score)) +
+geom_point(color = "#40b2d2", size = 1.5) +
+  geom_smooth(aes(group = 1), 
+method = "gam", formula = y ~ s(x, bs = "ps") ,se = TRUE,color = "#337BAC", fill = "#8bd2e9", size = 0.6, alpha = 0.2) +
+  geom_rug(col="#acc8dd")+
+  labs(x = "Days Since CART", y = NULL,title =  "Average Collagen Formation Activity") +scale_y_continuous(
+  limits = c(0.15, 0.4),
+  breaks = seq(0.15, 0.4, by = 0.05)
+)+
+  
+scale_x_continuous(limits = c(0,550),breaks = seq(0,550,by=50))+
+    theme_classic() +
+  theme(
+    axis.line = element_blank(),     
+    panel.border = element_rect(color = "black", fill = NA, linewidth =  1.2,linetype = "solid") , 
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_line(size = 0.5),
+    axis.text = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.text.x = element_text( hjust = 1),
+    axis.title.x = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.title.y = element_text(size = 14, family = "Arial", colour = "black"),
+    legend.position = "none",aspect.ratio =0.8
+  )
+p1
+ggsave(file="collagenformation_withoutre.pdf",plot =p1, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "collagenformation_withoutre.png",
+  plot =  p1,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+```
+
+```{r superficial and epidermal development}
+super <- subset(fibroblast,fibroblast_subtype=="Superficial")
+super1 <- Seurat::PseudobulkExpression(super, assays = 'Xenium',
+                                   group.by = c( "SampleId"),
+                                   normalization.method = 'LogNormalize',
+                                   scale.factor = 300)
+
+targets <- EPIDERMIS_DEVELOPMENT
+
+net2<- data.frame(
+  source = rep("epidermis_development", length(targets)),
+  target = targets
+)
+
+
+mat2 <- as.matrix(super1[[1]])
+net2 <- filter(net2, net2$target %in% rownames(mat2))
+actss <- decoupleR::run_aucell(
+  mat = mat2,
+ net = net2,
+  .source = source,
+  .target = target,
+  aucMaxRank = ceiling(0.05 * nrow(mat2)),
+  nproc = availableCores(),
+  seed = 42,
+  minsize = 5
+)
+metadatas <- super@meta.data
+mapping <- metadatas  %>%
+  dplyr::select(Patient, SampleId,DaysSinceCART) %>%
+  distinct()
+
+actss <- actss %>%
+  rename(SampleId =condition) %>%
+  left_join(mapping, by = "SampleId")
+```
+
+```{r SUPERFICIAL day and pseudo}
+
+p3 <- ggplot(actss, aes(x = DaysSinceCART, y = score)) +
+  geom_point(color = "#40b2d2", size = 1.5) +
+  geom_smooth(aes(group = 1), 
+method = "gam", formula = y ~ s(x, bs = "ps") ,se = TRUE,color = "#337BAC", fill = "#8bd2e9", size = 0.6, alpha = 0.2) +
+  geom_rug(col="#acc8dd")+
+  labs(x = NULL, y = NULL,title ="Average Epidermis Development Activity") +scale_y_continuous(
+  limits = c(0, 0.1),
+  breaks = seq(0, 0.1, by = 0.025)
+)+
+  
+scale_x_continuous(limits = c(0,550),breaks = seq(0,550,by=50))+
+    theme_classic() +
+  theme(
+    axis.line = element_blank(),     
+    panel.border = element_rect(color = "black", fill = NA, linewidth =  1.2,linetype = "solid") , 
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_line(size = 0.5),
+    axis.text = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.text.x = element_text( hjust = 1),
+    axis.title.x = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.title.y = element_text(size = 14, family = "Arial", colour = "black"),
+    legend.position = "none",aspect.ratio =0.8
+  )
+p3
+ggsave(file="Epidermis Development_withoutre.pdf",plot =p3, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "Epidermis Development_withoutre.png",
+  plot =  p3,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+```
+
+
+```{r fibroT_CELL_ACTIVATION}
+
+fibroblast1 <- Seurat::PseudobulkExpression(fibroblast, assays = 'Xenium',
+                                   group.by = c( "SampleId"),
+                                   normalization.method = 'LogNormalize',
+                                   scale.factor = 300)
+mat1 <- as.matrix(fibroblast1[[1]])
+targets <- T_CELL_ACTIVATION 
+
+net1 <- data.frame(
+  source = rep("T_CELL_ACTIVATION", length(targets)),
+  target = targets
+)
+
+net1 <- filter(net1, net1$target %in% rownames(mat1))
+acts <- decoupleR::run_aucell(
+  mat = mat1,
+ net = net1,
+  .source = source,
+  .target = target,
+  aucMaxRank = ceiling(0.05 * nrow(mat1)),
+  nproc = availableCores(),
+  seed = 42,
+  minsize = 5
+)
+
+metadata <- fibroblast@meta.data
+mapping <- metadata  %>%
+  dplyr::select(Patient, SampleId,DaysSinceCART) %>%
+  distinct()
+
+
+acts <- acts %>%
+  rename(SampleId =condition) %>%
+  left_join(mapping, by = "SampleId")
+```
+
+```{r fibro T_CELL_ACTIVATION1}
+p3 <- ggplot(acts, aes(x = DaysSinceCART, y = score)) +
+geom_point(color = "#40b2d2", size = 1.5) +
+  geom_smooth(aes(group = 1), 
+method = "gam", formula = y ~ s(x, bs = "ps") ,se = TRUE,color = "#337BAC", fill = "#8bd2e9", size = 0.6, alpha = 0.2) +
+  geom_rug(col="#acc8dd")+
+  labs(x = "Days Since CART", y = NULL,title =  "Average T Cell Activation Activity for fibroblast") +scale_y_continuous(
+  limits = c(-0.01, 0.06),
+  breaks = seq(0, 0.06, by = 0.01)
+)+
+  
+scale_x_continuous(limits = c(0,550),breaks = seq(0,550,by=50))+
+    theme_classic() +
+  theme(
+    axis.line = element_blank(),     
+    panel.border = element_rect(color = "black", fill = NA, linewidth =  1.2,linetype = "solid") , 
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_line(size = 0.5),
+    axis.text = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.text.x = element_text( hjust = 1),
+    axis.title.x = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.title.y = element_text(size = 14, family = "Arial", colour = "black"),
+    legend.position = "none",aspect.ratio =0.8
+  )
+p3
+ggsave(file="fibroAverage T Cell Activation _withoutre.pdf",plot =p3, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "fibroAverage T Cell Activation _withoutre.png",
+  plot =  p3,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+```
+
