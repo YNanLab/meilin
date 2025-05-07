@@ -1,0 +1,222 @@
+---
+title: "Untitled"
+author: "meilin"
+date: "2025-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(parallelly)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(purrr)
+library(stringr)
+library(Seurat)
+obj <- readRDS('/Users/xu/Desktop/1_project/fgsea/data/ErlCART_Xenium_DermComp_250414112430.rds')
+epidermal <-obj[,obj$DermComp=="Epidermis"]  
+epidermal$DaysSinceCART <- case_when(epidermal$SampleId == 'HAUCK' ~ 128,
+                               epidermal$SampleId == 'SSc213' ~ 37,
+                                epidermal$SampleId == 'SSc214' ~ 0,
+                                epidermal$SampleId == 'SSc223' ~ 126,
+                                epidermal$SampleId == 'SSc224' ~ 182,
+                                epidermal$SampleId == 'SSc225' ~ 35,
+                                epidermal$SampleId == 'SSc230' ~ 0,
+                                epidermal$SampleId == 'SSc233' ~ 56,
+                                epidermal$SampleId == 'SSc234' ~ 0,
+                                epidermal$SampleId == 'SSc237' ~ 29,
+                                epidermal$SampleId == 'SSc239' ~ 406,
+                                epidermal$SampleId == 'SSc240' ~ 527,
+                                epidermal$SampleId == 'SSc241' ~ 363,
+                               epidermal$SampleId == 'SSc244' ~ 0,
+                                epidermal$SampleId == 'SSc246' ~ 0,
+                                epidermal$SampleId == 'SSc247' ~ 169,
+                                epidermal$SampleId == 'SSc248' ~ 28,
+                                epidermal$SampleId == 'SSc249' ~ 266,
+                                epidermal$SampleId == 'SSc250' ~ 0,
+                                epidermal$SampleId == 'SSc253' ~ 0,
+                                epidermal$SampleId == 'SSc256' ~ 28,
+                                epidermal$SampleId == 'SSc261' ~ 28,
+                                epidermal$SampleId == 'SSc264' ~ 30,
+                                .default = NA)
+```
+
+```{r}
+bader <- read_lines('/Users/xu/Desktop/1_project/fgsea/data/Human_GOBP_AllPathways_noPFOCR_no_GO_iea_March_01_2025_symbol.gmt')
+bader_net <- bader %>%
+  map_df(~ {
+    # Split each line by tab
+    line <- str_split(.x, "\t", simplify = TRUE)
+    tibble(
+      pathway = line[1],               # Pathway name
+      gene = line[-(1:2)]              # Genes (skip first 2 columns: name and description)
+    )
+  }) %>%
+  unnest(cols = gene) %>%              # Expand list-column into rows
+  filter(gene != "")                   # Remove empty entries if any
+bader_net <- bader_net %>%
+  separate(pathway, into = c("pathway_name", "source", "description"), sep = "%", fill = "right") %>%
+  unite('pathway', c('pathway_name', 'source'), sep = '%')
+bader_net <- bader_net %>%
+  distinct(pathway, gene, .keep_all = TRUE)
+
+
+bader_net <- filter(bader_net, gene %in% rownames(epidermal))
+
+bader_net<- bader_net %>% split(x = .$gene, f = .$pathway)
+
+NERVOUS_SYSTEM_DEVELOPMENT <- bader_net[["NERVOUS SYSTEM DEVELOPMENT%GOBP"]]
+IMMUNE_RESPONSE <- bader_net[["IMMUNE RESPONSE%GOBP"]]
+```
+
+```{r   NERVOUS_SYSTEM_DEVELOPMENT}
+epidermal2 <- Seurat::PseudobulkExpression(epidermal, assays = 'Xenium',
+                                   group.by =  "SampleId",
+                                   normalization.method = 'LogNormalize',
+                                   scale.factor = 300)
+
+targets <- NERVOUS_SYSTEM_DEVELOPMENT
+
+net2<- data.frame(
+  source = rep("NERVOUS_SYSTEM_DEVELOPMENT", length(targets)),
+  target = targets
+)
+
+
+mat2 <- as.matrix(epidermal2[[1]])
+net2 <- filter(net2, net2$target %in% rownames(mat2))
+actsn <- decoupleR::run_aucell(
+  mat = mat2,
+ net = net2,
+  .source = source,
+  .target = target,
+  aucMaxRank = ceiling(0.05 * nrow(mat2)),
+  nproc = availableCores(),
+  seed = 42,
+  minsize = 5
+)
+metadatas <- epidermal@meta.data
+mapping <- metadatas  %>%
+  dplyr::select(Patient, SampleId,DaysSinceCART) %>%
+  distinct()
+
+actsn <- actsn %>%
+  rename(SampleId =condition) %>%
+  left_join(mapping, by = "SampleId")
+```
+
+```{r NERVOUS_SYSTEM_DEVELOPMENT1}
+
+p3 <- ggplot(actsn, aes(x = DaysSinceCART, y = score)) +
+ geom_point(color = "#8488b5", size = 1.5) +
+  geom_smooth(aes(group = 1), 
+method = "gam", formula = y ~ s(x, bs = "ps") ,se = TRUE,color = "#61678b", fill = "#bcb9d8", size = 0.6, alpha = 0.2) +
+  geom_rug(col="#16285f")+
+  labs(x = NULL, y = NULL, title = "Average Nervous System Development Activity") +scale_y_continuous(
+  limits = c(0.08, 0.25),
+  breaks = seq(0.08, 0.25, by = 0.04)
+)+
+  
+scale_x_continuous(limits = c(0,550),breaks = seq(0,550,by=50))+
+    theme_classic() +
+  theme(
+    axis.line = element_blank(),     
+    panel.border = element_rect(color = "black", fill = NA, linewidth =  1.2,linetype = "solid") , 
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_line(size = 0.5),
+    axis.text = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.text.x = element_text( hjust = 1),
+    axis.title.x = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.title.y = element_text(size = 14, family = "Arial", colour = "black"),
+    legend.position = "none",aspect.ratio =0.8
+  )
+p3
+ggsave(file="nervous Development_withoutre.pdf",plot =p3, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "nervous Development_withoutre.png",
+  plot =  p3,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+```
+
+```{r IMMUNE_RESPONSE}
+epidermal3 <- Seurat::PseudobulkExpression(epidermal, assays = 'Xenium',
+                                   group.by = c( "SampleId"),
+                                   normalization.method = 'LogNormalize',
+                                   scale.factor = 300)
+
+targets <-IMMUNE_RESPONSE 
+
+net3<- data.frame(
+  source = rep("IMMUNE_RESPONSE ", length(targets)),
+  target = targets
+)
+
+mat3 <- as.matrix(epidermal3[[1]])
+net3 <- filter(net3, net3$target %in% rownames(mat3))
+actsi <- decoupleR::run_aucell(
+  mat = mat3,
+ net = net3,
+  .source = source,
+  .target = target,
+  aucMaxRank = ceiling(0.05 * nrow(mat3)),
+  nproc = availableCores(),
+  seed = 42,
+  minsize = 5
+)
+metadatas <- epidermal@meta.data
+mapping <- metadatas  %>%
+  dplyr::select(Patient, SampleId,DaysSinceCART) %>%
+  distinct()
+
+actsi <- actsi %>%
+  rename(SampleId =condition) %>%
+  left_join(mapping, by = "SampleId")
+```
+
+```{r }
+
+p5 <- ggplot(actsi, aes(x = DaysSinceCART, y = score)) +
+ geom_point(color = "#8488b5", size = 1.5) +
+  geom_smooth(aes(group = 1), 
+method = "gam", formula = y ~ s(x, bs = "ps") ,se = TRUE,color = "#61678b", fill = "#bcb9d8", size = 0.6, alpha = 0.2) +
+  geom_rug(col="#16285f")+
+  labs(x = NULL, y = NULL, title = "Average Immune Response Activity") +scale_y_continuous(
+ limits = c(-0.05, 0.24),
+  breaks = seq(-0.02, 0.22, by = 0.06)
+)+
+  
+scale_x_continuous(limits = c(0,550),breaks = seq(0,550,by=50))+
+    theme_classic() +
+  theme(
+    axis.line = element_blank(),     
+    panel.border = element_rect(color = "black", fill = NA, linewidth =  1.2,linetype = "solid") , 
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.ticks = element_line(size = 0.5),
+    axis.text = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.text.x = element_text( hjust = 1),
+    axis.title.x = element_text(size = 14, family = "Arial", colour = "black"),
+    axis.title.y = element_text(size = 14, family = "Arial", colour = "black"),
+    legend.position = "none",aspect.ratio =0.8
+  )
+p5
+ggsave(file="ir_withoutre.pdf",plot =p5, width = 6, height =6, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "ir_withoutre.png",
+  plot =  p5,
+  width = 6,          
+  height = 6,         
+  dpi = 600           
+)
+
+```
