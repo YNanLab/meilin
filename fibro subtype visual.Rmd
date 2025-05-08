@@ -1,0 +1,207 @@
+---
+title: "fibro subtype visualize"
+author: "meilin"
+date: "2025-04-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+
+```
+
+```{r ts}
+ptm <- proc.time()
+tstamp <- format(Sys.time(), '%y%m%d%H%M%S')
+
+```
+  
+```{r data}
+library(tidyverse)
+
+data<- readRDS("/Users/xu/Desktop/1_project/fgsea/data/20250410_ErlCARTXenium_Fib_FgseaRes_250411085614.rds")
+
+
+
+
+```
+
+
+```{r process data}
+library(ggsci)
+library(ggnewscale)
+library(ggforce)  
+library(ggpubr)   
+library(ggh4x)
+data <- filter(data, pathway %in% c(
+
+"GENERATION OF NEURONS%GOBP",
+"NEUROGENESIS%GOBP",
+"ENDOTHELIAL CELL DEVELOPMENT%GOBP",
+"VASCULATURE DEVELOPMENT%GOBP",
+"SKIN DEVELOPMENT%GOBP",
+"EPIDERMIS DEVELOPMENT%GOBP",
+"WNT SIGNALING PATHWAY%GOBP",
+
+ 'COLLAGEN FORMATION%REACTOME',
+"EXTRACELLULAR MATRIX ORGANIZATION%GOBP",
+"HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION%MSIGDBHALLMARK",
+
+"LEUKOCYTE CHEMOTAXIS%GOBP",
+"HALLMARK_INFLAMMATORY_RESPONSE%MSIGDBHALLMARK",
+"T CELL ACTIVATION%GOBP",
+"HALLMARK_INTERFERON_GAMMA_RESPONSE%MSIGDBHALLMARK",
+"IMMUNE RESPONSE%GOBP"
+  ) ) %>%
+   mutate(name = str_split_i(pathway, '%', 1), logp = -log10(pval))
+ 
+data <- mutate(data,
+               cols = ifelse(logp > 3, 3, logp), 
+               type = ifelse(NES>0, 'act', 'deact'),
+               AbsNES = abs(NES)) %>%
+  filter(pval < .05)
+
+data$name <- factor(data$name, levels = c(
+ "LEUKOCYTE CHEMOTAXIS",
+"HALLMARK_INFLAMMATORY_RESPONSE",
+"T CELL ACTIVATION",
+"HALLMARK_INTERFERON_GAMMA_RESPONSE",
+"IMMUNE RESPONSE",
+
+  "GENERATION OF NEURONS",
+"NEUROGENESIS",
+"ENDOTHELIAL CELL DEVELOPMENT",
+"VASCULATURE DEVELOPMENT",
+"SKIN DEVELOPMENT",
+"EPIDERMIS DEVELOPMENT",
+"WNT SIGNALING PATHWAY",
+
+ 'COLLAGEN FORMATION',
+"EXTRACELLULAR MATRIX ORGANIZATION",
+"HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"))
+
+group1 <- c(
+"GENERATION OF NEURONS",
+"NEUROGENESIS",
+"ENDOTHELIAL CELL DEVELOPMENT",
+"VASCULATURE DEVELOPMENT",
+"SKIN DEVELOPMENT",
+"EPIDERMIS DEVELOPMENT",
+"WNT SIGNALING PATHWAY")
+
+group2 <- c(
+   'COLLAGEN FORMATION',
+"EXTRACELLULAR MATRIX ORGANIZATION",
+"HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION")
+group3 <- c(
+  "LEUKOCYTE CHEMOTAXIS",
+"HALLMARK_INFLAMMATORY_RESPONSE",
+"T CELL ACTIVATION",
+"HALLMARK_INTERFERON_GAMMA_RESPONSE",
+"IMMUNE RESPONSE")
+
+
+data <- data %>%
+  mutate(category = case_when(
+    name %in% group1 ~ "Development Related",
+    name %in% group2 ~  "Fibrosis Related",
+    name %in% group3 ~ "Immune Response",
+    TRUE ~ "Other"
+  ))
+data$category <- factor(data$category,levels = c("Immune Response","Development Related","Fibrosis Related"))
+
+data$celltype <- factor(
+  data$celltype,
+  levels = c(
+    'Superficial',
+    'COL8A1+',
+    'Universal',
+    'TNN+COCH+',
+    'CCL8+',
+    'CCL19+APOE+',
+    'S100A4+',
+    'IGFBP4+',
+    'ACTA2+TAGLN+'
+  )
+)
+```
+
+
+
+
+
+
+```{r fig2}
+library(ggplot2)
+library(dplyr)
+library(ggh4x)
+library(ggnewscale)
+library(ggpubr)
+rgb_code <- rgb(231, 124, 142, maxColorValue = 255)
+print(rgb_code)
+
+
+colors <- c(rep("#5E90B8",5),
+           rep("#66c2a5",7),
+           rep("#E77C8E",3)
+           )
+
+p1 <- ggplot() +
+  geom_point(
+    data = filter(data, NES > 0),
+    aes(x = celltype, y = interaction(name,category), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#edb8b0", "#e69191","#c25759"))(50),
+    name = "-log10(p)\n(Activated)   "
+  ,limits = c(10, 20) ,
+  oob = scales::squish) +
+  new_scale_fill() +
+  geom_point(
+    data = filter(data, NES < 0),
+    aes(x = celltype, y = interaction(name,category), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#aecfd4", "#92b5ca", "#599cb4"))(50),
+    name = "-log10(p)\n(Deactivated)   "
+  ,limits = c(10, 20) ,
+  oob = scales::squish) +
+  guides(y = "axis_nested") +  
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", linewidth = 1),
+    axis.text.x = element_text(angle = 45, color = "black", size = 14, hjust = 1,family = "Arial", face = "bold"), 
+    axis.text.y = element_text(color = colors, size = 14, vjust = 0.5,family = "Arial", face = "bold"),
+    axis.ticks = element_blank(),
+    legend.title = element_text(size = 12,family = "Arial"),
+    legend.text = element_text(size = 12,family = "Arial"),
+    legend.position = "bottom",
+  legend.box = "vertical",
+    ggh4x.axis.nestline.y = element_line(size = 0.6),
+    ggh4x.axis.nesttext.y = element_text(colour = c("#5E90B8","#66c2a5", "#E77C8E"),family = "Arial", size = 14)
+  ) +
+  labs(x = NULL, y = NULL) 
+
+p1
+
+ggsave("fibro SUBTYPE fgsea with catagory.pdf", plot = p1, width = 12, height =8, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "fibro SUBTYPE fgsea with catagory.png",
+  plot =  p1,
+  width = 12,          
+  height = 8,         
+  dpi = 600           
+)
+```
+
+
+
+
+```
+
+
+
+

@@ -1,0 +1,302 @@
+---
+title: "fibro_fgsea"
+author: "meilin"
+date: "2025-04-21"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+
+knitr::opts_knit$set(root.dir = "/Users/xu/Desktop/1_project/fgsea")
+```
+
+```{r ts}
+ptm <- proc.time()
+tstamp <- format(Sys.time(), '%y%m%d%H%M%S')
+
+```
+  
+```{r data}
+library(tidyverse)
+
+data<- readRDS("data/20250410_ErlCARTXenium_Fib_FgseaRes_250415085632.rds")
+
+
+
+
+```
+
+```{r process data}
+library(ggsci)
+library(ggnewscale)
+library(ggforce)  
+library(ggpubr)   
+library(ggh4x)
+data <- filter(data, pathway %in% c(
+  'EPIDERMIS DEVELOPMENT%GOBP',
+  'NEUROGENESIS%GOBP',
+  'WNT SIGNALING PATHWAY%PANTHER PATHWAY',
+  'SKIN DEVELOPMENT%GOBP',
+  'LEUKOCYTE CHEMOTAXIS%GOBP',
+  'T CELL ACTIVATION%GOBP',
+  'HALLMARK_INFLAMMATORY_RESPONSE%MSIGDBHALLMARK',
+  'CD40 CD40L SIGNALING%PATHWAY INTERACTION DATABASE NCI-NATURE CURATED DATA',
+  'ENDOTHELIAL CELL DIFFERENTIATION%GOBP',
+  'COLLAGEN FORMATION%REACTOME',
+  'EXTRACELLULAR MATRIX ORGANIZATION%REACTOME',
+  'HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION%MSIGDBHALLMARK',
+  'L1CAM INTERACTIONS%REACTOME',
+  'NEURON DEVELOPMENT%GOBP',
+  'INTERFERON SIGNALING%REACTOME DATABASE ID RELEASE 91'
+  ) & group %in% c('SSc_postCART_early','SSc_postCART_superlate')) %>%
+   mutate(name = str_split_i(pathway, '%', 1), logp = -log10(pval))
+ 
+data <- mutate(data,
+               cols = ifelse(logp > 3, 3, logp), 
+               type = ifelse(NES>0, 'act', 'deact'),
+               AbsNES = abs(NES)) %>%
+  filter(pval < .05)
+
+data$name <- factor(data$name, levels = c(
+ 
+
+  
+  
+ 
+   'LEUKOCYTE CHEMOTAXIS',
+  'HALLMARK_INFLAMMATORY_RESPONSE',
+  'INTERFERON SIGNALING',
+  'T CELL ACTIVATION',
+  'CD40 CD40L SIGNALING',
+ 
+  'EPIDERMIS DEVELOPMENT',
+  'SKIN DEVELOPMENT',
+  'ENDOTHELIAL CELL DIFFERENTIATION',
+  'NEUROGENESIS',
+  'NEURON DEVELOPMENT',
+  'L1CAM INTERACTIONS',
+  'WNT SIGNALING PATHWAY',
+  
+  'COLLAGEN FORMATION',
+  'EXTRACELLULAR MATRIX ORGANIZATION',
+  'HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION'
+  
+  ))
+
+data$celltype <- factor(
+  data$celltype,
+  levels = c(
+    'Superficial',
+    'COL8A1+',
+    'Universal',
+    'TNN+COCH+',
+    'CCL8+',
+    'CCL19+APOE+',
+    'S100A4+',
+    'IGFBP4+',
+    'ACTA2+TAGLN+'
+  )
+)
+
+#
+group1 <- c('EPIDERMIS DEVELOPMENT',
+  'SKIN DEVELOPMENT',
+  'ENDOTHELIAL CELL DIFFERENTIATION',
+  'NEUROGENESIS',
+  'NEURON DEVELOPMENT',
+  'L1CAM INTERACTIONS',
+  'WNT SIGNALING PATHWAY')
+group2 <- c(
+   'COLLAGEN FORMATION',
+  'EXTRACELLULAR MATRIX ORGANIZATION',
+  'HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION')
+group3 <- c(
+  'LEUKOCYTE CHEMOTAXIS',
+  'HALLMARK_INFLAMMATORY_RESPONSE',
+  'INTERFERON SIGNALING',
+  'T CELL ACTIVATION',
+  'CD40 CD40L SIGNALING')
+
+
+data <- data %>%
+  mutate(category = case_when(
+    name %in% group1 ~ "Development Related",
+    name %in% group2 ~  "Fibrosis Related",
+    name %in% group3 ~ "Immune Response",
+    TRUE ~ "Other"
+  ))
+data$category <- factor(data$category,levels = c("Immune Response","Development Related","Fibrosis Related"))
+
+#
+data$group[data$group == 'SSc_postCART_early'] <- "1m FU vs BL"
+data$group[data$group == 'SSc_postCART_superlate'] <- "12m FU vs BL"
+data$group <- factor(data$group,levels=c("1m FU vs BL","12m FU vs BL"))
+```
+
+
+
+
+#```{r fig1}
+
+p <- ggplot() +
+  geom_point(
+    data = filter(data, NES > 0),
+    aes(x = celltype, y = name, fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#EDADC5", "#CEAAD0", "#9284C1"))(50),
+    name = "-log10(p)\n(Activated)"
+  ) +
+  new_scale_fill() +
+  geom_point(
+    data = filter(data, NES < 0),
+    aes(x = celltype, y = name, fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#AAD7C8", "#6CBEC3", "#619CD9"))(50),
+    name = "-log10(p)\n(Deactivated)"
+  ) +
+  
+  scale_y_discrete(limits = c(
+  'EPIDERMIS DEVELOPMENT',
+  'SKIN DEVELOPMENT',
+  'ENDOTHELIAL CELL DIFFERENTIATION',
+  'NEUROGENESIS',
+  'NEURON DEVELOPMENT',
+  'L1CAM INTERACTIONS',
+  'COLLAGEN FORMATION',
+  'COLLAGEN FIBRIL ORGANIZATION',
+  'COLLAGEN BIOSYNTHESIS AND MODIFYING ENZYMES',
+  'EXTRACELLULAR MATRIX ORGANIZATION',
+  'HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION',
+  'PID_AP1_PATHWAY',
+  'PID_CXCR4_PATHWAY',
+  'LEUKOCYTE CHEMOTAXIS',
+  'INNATE IMMUNE RESPONSE',
+  'HALLMARK_INFLAMMATORY_RESPONSE',
+  'INTERFERON SIGNALING',
+  'POSITIVE REGULATION OF T CELL MIGRATION',
+  'T CELL ACTIVATION',
+  'REGULATION OF B CELL PROLIFERATION',
+  'CD40 CD40L SIGNALING',
+  'AMB2 INTEGRIN SIGNALING',
+  'WNT SIGNALING PATHWAY',
+  'CANONICAL WNT SIGNALING PATHWAY'
+  ))+
+
+  ggh4x::facet_grid2(. ~ group, scales = "fixed", space = "free", switch = "x",
+             strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "#619CD9"),  
+        element_rect(fill = "#9284C1")) ) )+
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", linewidth = 1),
+    strip.background.x = element_rect(color = "white"),
+    strip.placement = "outside",
+    strip.text.x = element_text(size = 13, color = "black", face = "bold"),
+    strip.text = element_text(color = "black", face = "bold", size = 14),
+    axis.text.x = element_text(angle = 90, color = "black", size = 13, hjust = 1), 
+    axis.text.y = element_text(color = "black", size = 13, vjust = 0.5),
+    axis.ticks = element_blank(),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 13)
+  ) +
+  guides(
+    fill = guide_colorbar(ticks = FALSE, barheight = 8, frame.colour = "black"),
+    size = guide_legend(title = "AbsNES")
+  ) +
+  labs(x = NULL, y = NULL) +
+  ggpubr::rotate_x_text(angle = 45, hjust = 1)
+
+p
+
+ggsave("fibro fgsea.pdf", plot = p, width = 12, height =8, units = "in", device = cairo_pdf)
+#```
+
+```{r fig2}
+library(ggplot2)
+library(dplyr)
+library(ggh4x)
+library(ggnewscale)
+library(ggpubr)
+
+
+colors <- c(rep("#5E90B8",5),
+           rep("#66c2a5",7),
+           rep("#E77C8E",3)
+           )
+
+p1 <- ggplot() +
+  geom_point(
+    data = filter(data, NES > 0),
+    aes(x = celltype, y = interaction(name,category), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#edb8b0", "#e69191","#c25759"))(50),
+    name = "-log10(p)\n(Activated)   ",
+   limits = c(2,4) ,
+  oob = scales::squish
+  ) +
+  new_scale_fill() +
+  geom_point(
+    data = filter(data, NES < 0),
+    aes(x = celltype, y = interaction(name,category), fill = logp, size = AbsNES),
+    shape = 21, color = "black"
+  ) +
+  scale_fill_gradientn(
+    colors = colorRampPalette(c("#aecfd4", "#92b5ca", "#599cb4"))(50),
+    name = "-log10(p)\n(Deactivated)   ",
+   limits = c(2,4) ,
+  oob = scales::squish
+  ) +
+  ggh4x::facet_grid2(. ~ group, scales = "fixed", space = "free", switch = "x",
+    strip = ggh4x::strip_themed(
+      background_x = list(
+        element_rect(fill = "#599cb4"),  
+        element_rect(fill = "#c25759")
+      )
+    )
+  ) +
+  guides(y = "axis_nested") +  
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", linewidth = 1),
+    strip.background.x = element_rect(color = "white"),
+    strip.placement = "outside",
+    strip.text.x = element_text(size = 13, color = "black", face = "bold"),
+    strip.text = element_text(color = "black", face = "bold", size = 14),
+    axis.text.x = element_text(angle = 45, color = "black", size = 13, hjust = 1, face = "bold"), 
+    axis.text.y = element_text(color = colors, size = 13, vjust = 0.5, face = "bold"),
+    axis.ticks = element_blank(),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 13),
+  legend.position = "bottom",
+  legend.box = "vertical", 
+  
+    ggh4x.axis.nestline.y = element_line(size = 0.6),
+    ggh4x.axis.nesttext.y = element_text(colour = c("#5E90B8","#66c2a5", "#E77C8E"))
+  ) +
+  labs(x = NULL, y = NULL) 
+
+p1
+
+ggsave("fibro fgsea with catagory.pdf", plot = p1, width = 12, height =8, units = "in", device = cairo_pdf)
+ggsave(
+  filename = "fibro fgsea with catagory.png",
+  plot =  p1,
+  width = 12,          
+  height = 8,         
+  dpi = 600           
+)
+```
+
+
+
